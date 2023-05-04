@@ -1,0 +1,92 @@
+name: CICD Pipe
+
+on:
+  push:
+    branches: [ "develop", "main" ]
+
+env:
+  DEP_PATH: /requirements.txt
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 4
+      matrix:
+        python-version: [3.9]
+    steps:
+    
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: actions/cache@v3
+        id: cache
+        with:
+          path: venv
+          key: pip-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('requirements.txt') }}
+
+      - if: steps.cache.outputs.cache-hit != 'true'
+        name: Creating new cache
+        run: |
+          python3 -m venv venv
+          venv/bin/python3 -m pip install -r /requirements.txt
+
+      - name: Run Tests
+        run: |
+          source venv/bin/activate
+          coverage run manage.py test -v 2 
+      
+      - name: Generate Coverage Report
+        id: coverage-report
+        run: |
+          source venv/bin/activate
+          coverage report --fail-under=75
+        
+      - name: Falha se a cobertura dos testes for insuficiente
+        if: ${{ steps.coverage-report.outputs.exit-code == 2 }}
+        run: exit 1
+
+      - name: Security vulnerabilities scan
+        uses: aufdenpunkt/python-safety-check@master
+        with:
+          scan_requirements_file_only: 'true'
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: API Service Deploy
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: you_repository_name
+          IMAGE_TAG: prod 
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f /Dockerfile .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          aws ecs update-service --cluster you_cluster --service you_service --force-new-deployment --region your_region
+      
+      # need to configure slack, veja:
+      # https://github.com/marketplace/actions/slack-notify-build
+      # https://api.slack.com/authentication/basics
+      - name: Notificação via slack Falha 
+        if: failure()
+        env:
+          SLACK_BOT_TOKEN: xoxb-284719956050-5132171136400-Av7f3HBuCxqpVd1QZXsLf3gB
+        uses: voxmedia/github-action-slack-notify-build@v1
+        with:
+          channel_id: C0536AVJUQK
+          status: FAILED
+          color: danger

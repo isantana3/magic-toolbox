@@ -1,0 +1,70 @@
+# Primeira versão do CICD
+name: Generic Pipe
+
+on:
+  push:
+    branches-ignore: # RUn when  push or merge
+     - develop
+     - main
+  pull_request: # Run when create the pull request
+    branches: [ "develop", "main" ]
+
+env:
+  DEP_PATH: /requirements.txt  # Path for your requirementes
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 4
+      matrix:
+        python-version: [3.9]
+    steps:
+    
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # use virtualenv for cache the packages installations
+      - uses: actions/cache@v3
+        id: cache
+        with:
+          path: venv
+          key: pip-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('requirements.txt') }}
+
+      # If not cache or change the requirements.txt, run the pip install
+      - if: steps.cache.outputs.cache-hit != 'true'
+        name: Creating new cache
+        run: |
+          python3 -m venv venv
+          venv/bin/python3 -m pip install -r devops/requirements.txt
+
+      # Run tests with coverage (need to be on requirements.txt)
+      # Can be replaced by django test (your choice)
+      - name: Run Tests
+        run: |
+          source venv/bin/activate
+          coverage run manage.py test -v 2
+      
+      # Works only with coverage
+      - name: Generate Coverage Report
+        id: coverage-report
+        run: |
+          source venv/bin/activate
+          coverage report --fail-under=75
+        
+      # Only with coverage you can set a minimum percentual of code covered
+      - name: Falha se a cobertura dos testes for insuficiente
+        if: ${{ steps.coverage-report.outputs.exit-code == 2 }}
+        run: exit 1
+
+      # Check for unsecurity packages on requirementes.txt
+      - name: Security vulnerabilities scan
+        uses: aufdenpunkt/python-safety-check@master
+        with:
+          scan_requirements_file_only: 'true'
