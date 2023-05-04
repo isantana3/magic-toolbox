@@ -84,9 +84,9 @@ jobs:
       - name: Notificação via slack Falha 
         if: failure()
         env:
-          SLACK_BOT_TOKEN: xoxb-284719956050-5132171136400-Av7f3HBuCxqpVd1QZXsLf3gB
+          SLACK_BOT_TOKEN: your_slack_bot_token
         uses: voxmedia/github-action-slack-notify-build@v1
         with:
-          channel_id: C0536AVJUQK
+          channel_id: your_channel_id
           status: FAILED
           color: danger
